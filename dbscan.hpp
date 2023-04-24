@@ -17,8 +17,8 @@ struct point3
     float x, y, z;
 };
 
-auto dbscan(const std::span<const point2>& data, float eps, int min_pts) -> std::vector<std::vector<size_t>>;
-auto dbscan(const std::span<const point3>& data, float eps, int min_pts) -> std::vector<std::vector<size_t>>;
+auto dbscan(const std::span<const point2>& data, float eps, int min_pts) -> std::pair<std::vector<std::vector<size_t>>, std::vector<int>>;
+// auto dbscan(const std::span<const point3>& data, float eps, int min_pts) -> std::vector<std::vector<size_t>>;
 
 // template<size_t dim>
 // auto dbscan(const std::span<float>& data, float eps, int min_pts)

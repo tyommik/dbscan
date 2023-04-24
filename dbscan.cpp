@@ -66,6 +66,69 @@ auto sort_clusters(std::vector<std::vector<size_t>>& clusters)
 }
 
 
+//template<int n_cols, typename Adaptor>
+//auto dbscan(const Adaptor& adapt, float eps, int min_pts)
+//{
+//    eps *= eps;
+//    using namespace nanoflann;
+//    using  my_kd_tree_t = KDTreeSingleIndexAdaptor<L2_Simple_Adaptor<float, decltype(adapt)>, decltype(adapt), n_cols>;
+//
+//    auto index = my_kd_tree_t(n_cols, adapt, KDTreeSingleIndexAdaptorParams(10));
+//    index.buildIndex();
+//
+//    const auto n_points = adapt.kdtree_get_point_count();
+//    auto visited  = std::vector<bool>(n_points);
+//    auto clusters = std::vector<std::vector<size_t>>();
+//    auto matches  = std::vector<std::pair<size_t, float>>();
+//    auto sub_matches = std::vector<std::pair<size_t, float>>();
+//
+//    for(size_t i = 0; i < n_points; i++)
+//    {
+//        if (visited[i]) continue;
+//
+//        index.radiusSearch(adapt.elem_ptr(i), eps, matches, SearchParams(32, 0.f, false));
+//        if (matches.size() < static_cast<size_t>(min_pts)) continue;
+//        visited[i] = true;
+//
+//        auto cluster = std::vector({i});
+//
+//        while (matches.empty() == false)
+//        {
+//            auto nb_idx = matches.back().first;
+//            matches.pop_back();
+//            if (visited[nb_idx]) continue;
+//            visited[nb_idx] = true;
+//
+//            index.radiusSearch(adapt.elem_ptr(nb_idx), eps, sub_matches, SearchParams(32, 0.f, false));
+//
+//            if (sub_matches.size() >= static_cast<size_t>(min_pts))
+//            {
+//                std::copy(sub_matches.begin(), sub_matches.end(), std::back_inserter(matches));
+//            }
+//            cluster.push_back(nb_idx);
+//        }
+//        clusters.emplace_back(std::move(cluster));
+//    }
+//    sort_clusters(clusters);
+//    return clusters;
+//}
+//
+//
+//auto dbscan(const std::span<const point2>& data, float eps, int min_pts) -> std::vector<std::vector<size_t>>
+//{
+//    const auto adapt = adaptor<point2>(data);
+//
+//    return dbscan<2>(adapt, eps, min_pts);
+//}
+//
+//
+//auto dbscan(const std::span<const point3>& data, float eps, int min_pts) -> std::vector<std::vector<size_t>>
+//{
+//    const auto adapt = adaptor<point3>(data);
+//
+//    return dbscan<3>(adapt, eps, min_pts);
+//}
+
 template<int n_cols, typename Adaptor>
 auto dbscan(const Adaptor& adapt, float eps, int min_pts)
 {
@@ -79,9 +142,11 @@ auto dbscan(const Adaptor& adapt, float eps, int min_pts)
     const auto n_points = adapt.kdtree_get_point_count();
     auto visited  = std::vector<bool>(n_points);
     auto clusters = std::vector<std::vector<size_t>>();
+    auto cluster_indices = std::vector<int>(n_points, -1);
     auto matches  = std::vector<std::pair<size_t, float>>();
     auto sub_matches = std::vector<std::pair<size_t, float>>();
 
+    int cluster_id = 0;
     for(size_t i = 0; i < n_points; i++)
     {
         if (visited[i]) continue;
@@ -89,10 +154,11 @@ auto dbscan(const Adaptor& adapt, float eps, int min_pts)
         index.radiusSearch(adapt.elem_ptr(i), eps, matches, SearchParams(32, 0.f, false));
         if (matches.size() < static_cast<size_t>(min_pts)) continue;
         visited[i] = true;
+        cluster_indices[i] = cluster_id;
 
-        auto cluster = std::vector({i});
+        auto cluster = std::vector<size_t>({i});
 
-        while (matches.empty() == false)
+        while (!matches.empty())
         {
             auto nb_idx = matches.back().first;
             matches.pop_back();
@@ -105,26 +171,17 @@ auto dbscan(const Adaptor& adapt, float eps, int min_pts)
             {
                 std::copy(sub_matches.begin(), sub_matches.end(), std::back_inserter(matches));
             }
+            cluster_indices[nb_idx] = cluster_id;
             cluster.push_back(nb_idx);
         }
         clusters.emplace_back(std::move(cluster));
+        cluster_id++;
     }
-    sort_clusters(clusters);
-    return clusters;
+    return std::make_pair(clusters, cluster_indices);
 }
 
-
-auto dbscan(const std::span<const point2>& data, float eps, int min_pts) -> std::vector<std::vector<size_t>>
+auto dbscan(const std::span<const point2>& data, float eps, int min_pts) -> std::pair<std::vector<std::vector<size_t>>, std::vector<int>>
 {
     const auto adapt = adaptor<point2>(data);
-
     return dbscan<2>(adapt, eps, min_pts);
-}
-
-
-auto dbscan(const std::span<const point3>& data, float eps, int min_pts) -> std::vector<std::vector<size_t>>
-{
-    const auto adapt = adaptor<point3>(data);
-
-    return dbscan<3>(adapt, eps, min_pts);
 }
