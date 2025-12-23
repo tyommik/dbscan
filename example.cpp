@@ -1,4 +1,5 @@
 #include "dbscan.hpp"
+
 #include <iostream>
 #include <string>
 #include <system_error>
@@ -13,98 +14,73 @@
 
 auto check_from_chars_error(std::errc err, const std::string_view& line, int line_counter)
 {
-    if(err == std::errc())
+    if (err == std::errc())
         return;
     
-    if(err == std::errc::invalid_argument)
+    if (err == std::errc::invalid_argument)
     {
         std::cerr << "Error: Invalid value \"" << line
-            << "\" at line " << line_counter << "\n";
+                  << "\" at line " << line_counter << "\n";
         std::exit(1);
     }
 
-    if(err == std::errc::result_out_of_range)
+    if (err == std::errc::result_out_of_range)
     {
-        std::cerr << "Error: Value \"" << line << "\"out of range at line " 
-                  <<  line_counter << "\n";
+        std::cerr << "Error: Value \"" << line << "\" out of range at line " 
+                  << line_counter << "\n";
         std::exit(1);
     }
-
-}
-
-
-auto read_pair(const std::string_view& line, int line_counter)
-{
-    auto res = std::pair<double, double>();
-
-    auto [ptr1, ec1] = std::from_chars(&line[0], &line[line.size()], res.first);
-    // make sure there is space between the numbers
-    ec1 = (ptr1 == &line[line.size()] || *ptr1 != ',')? std::errc::invalid_argument: ec1;
-    ptr1++;
-    check_from_chars_error(ec1, line, line_counter);
-
-
-    auto [ptr2, ec2] = std::from_chars(ptr1, &line[line.size()], res.second);
-    check_from_chars_error(ec2, line, line_counter);
-
-    return res;
 }
 
 
 auto push_values(std::vector<float>& store, const std::string_view& line, int line_counter)
 {
     auto ptr = line.data();
-    auto ec  = std::errc();
     auto n_pushed = 0;
 
     do
     {
         float value;
-        auto [p, ec] =  std::from_chars(ptr, &line[line.size()], value);
-        ptr = p + 1;
+        auto [p, ec] = std::from_chars(ptr, line.data() + line.size(), value);
         check_from_chars_error(ec, line, line_counter);
-        n_pushed++;
+        
         store.push_back(value);
+        n_pushed++;
+        ptr = p + 1;  // Skip delimiter
 
-    }while(ptr < line.data() + line.size());
+    } while (ptr < line.data() + line.size());
 
     return n_pushed;
 }
-
 
 
 auto read_values(const std::string& filename)
 {
     std::ifstream file(filename);
 
-    if(not file.good())
+    if (!file.good())
     {
         std::perror(filename.c_str());
         std::exit(2);
     }
 
     auto count = 0;
-
     auto points = std::vector<float>();
-    auto dim    = 0;
+    auto dim = 0;
 
-    while(not file.eof())
+    std::string line;
+    while (std::getline(file, line))
     {
         count++;
-        auto line = std::string();
-        std::getline(file, line);
 
-        if(not line.empty())
+        if (!line.empty())
         {
             auto n_pushed = push_values(points, line, count);
 
-            if(count != 1)
+            if (dim != 0 && n_pushed != dim)
             {
-                if(n_pushed != dim)
-                {
-                    std::cerr << "Inconsistent number of dimensions at line '" << count << "'\n";
-                    std::exit(1);
-                }
+                std::cerr << "Inconsistent number of dimensions at line " << count << "\n";
+                std::exit(1);
             }
             dim = n_pushed;
         }
@@ -120,7 +96,7 @@ auto to_num(const std::string& str)
     T value = 0;
     auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), value);
 
-    if(ec != std::errc())
+    if (ec != std::errc())
     {
         std::cerr << "Error converting value '" << str << "'\n";
         std::exit(1);
@@ -129,95 +105,91 @@ auto to_num(const std::string& str)
 }
 
 
-// noise will be labelled as 0
-auto flatten(const std::vector<std::vector<size_t>>& clusters, size_t n)
+// Noise points get label 0, clusters get labels 1, 2, 3, ...
+auto flatten_clusters(const std::vector<std::vector<size_t>>& clusters, size_t n_points)
 {
-    auto flat_clusters = std::vector<size_t>(n);
+    auto labels = std::vector<size_t>(n_points, 0);  // 0 = noise
 
-    for(size_t i = 0; i < clusters.size(); i++)
+    for (size_t cluster_id = 0; cluster_id < clusters.size(); cluster_id++)
     {
-        for(auto p: clusters[i])
+        for (auto point_idx : clusters[cluster_id])
         {
-            flat_clusters[p] = i + 1;
+            labels[point_idx] = cluster_id + 1;
         }
     }
 
-    return flat_clusters;
+    return labels;
 }
 
 
-auto run_dbscan(int dim, const std::span<const point2>& data, float eps, int min_pts)
+void run_dbscan_2d(const std::span<const float>& data, float eps, int min_pts)
 {
-    assert(data.size() % dim == 0);
-    assert(dim == 2 or dim == 3);
-
-    if(dim == 2)
-    {
-        auto points = std::vector<point2>(data.size() / dim);
-        std::memcpy(points.data(), data.data(), sizeof(float) * data.size());
-
-        return dbscan(data, eps, min_pts);
-    }
+    const size_t n_points = data.size() / 2;
     
-
-    auto points = std::vector<point3>(data.size() / dim);
+    auto points = std::vector<point2>(n_points);
     std::memcpy(points.data(), data.data(), sizeof(float) * data.size());
+
+    auto [clusters, cluster_indices] = dbscan(std::span<const point2>(points), eps, min_pts);
+    auto labels = flatten_clusters(clusters, n_points);
+
+    for (size_t i = 0; i < n_points; i++)
+    {
+        std::cout << points[i].x << ',' << points[i].y << ',' << labels[i] << '\n';
+    }
+}
+
+
+void run_dbscan_3d(const std::span<const float>& data, float eps, int min_pts)
+{
+    const size_t n_points = data.size() / 3;
     
-    return dbscan(data, eps, min_pts);
-}
-
-
-auto dbscan2d(const std::span<const float>& data, float eps, int min_pts)
-{
-    auto points = std::vector<point2>(data.size() / 2);
-
+    auto points = std::vector<point3>(n_points);
     std::memcpy(points.data(), data.data(), sizeof(float) * data.size());
 
-    auto clusters = dbscan(points, eps, min_pts);
-    auto flat     = flatten(clusters, points.size());
+    auto [clusters, cluster_indices] = dbscan(std::span<const point3>(points), eps, min_pts);
+    auto labels = flatten_clusters(clusters, n_points);
 
-    for(size_t i = 0; i < points.size(); i++)
+    for (size_t i = 0; i < n_points; i++)
     {
-        std::cout << points[i].x << ',' << points[i].y << ','  << flat[i] << '\n';
+        std::cout << points[i].x << ',' << points[i].y << ',' << points[i].z << ',' << labels[i] << '\n';
     }
 }
-
-
-auto dbscan3d(const std::span<const float>& data, float eps, int min_pts)
-{
-    auto points = std::vector<point3>(data.size() / 3);
-
-    std::memcpy(points.data(), data.data(), sizeof(float) * data.size());
-
-    auto clusters = dbscan(points, eps, min_pts);
-    auto flat     = flatten(clusters, points.size());
-
-    for(size_t i = 0; i < points.size(); i++)
-    {
-        std::cout << points[i].x << ',' << points[i].y << ',' << points[i].z << ',' << flat[i] << '\n';
-    }
-}
-
 
 
 int main(int argc, char** argv)
 {
-    if(argc != 4)
+    if (argc != 4)
     {
-        std::cerr << "usage: example <tsv file> <epsilon> <min points>\n";
+        std::cerr << "Usage: " << argv[0] << " <csv file> <epsilon> <min_points>\n";
+        std::cerr << "\n";
+        std::cerr << "Input file format: CSV with 2 or 3 columns (x,y or x,y,z)\n";
+        std::cerr << "Output: input coordinates + cluster label (0 = noise)\n";
         return 1;
     }
 
-    auto epsilon  = to_num<float>(argv[2]);
-    auto min_pts  = to_num<int>  (argv[3]);
+    auto epsilon = to_num<float>(argv[2]);
+    auto min_pts = to_num<int>(argv[3]);
     auto [values, dim] = read_values(argv[1]);
 
-    if(dim == 2)
+    if (values.empty())
     {
-        dbscan2d(values, epsilon, min_pts);
+        std::cerr << "Error: No points found in file\n";
+        return 1;
+    }
+
+    if (dim == 2)
+    {
+        run_dbscan_2d(values, epsilon, min_pts);
     }
     else if (dim == 3)
     {
-        dbscan3d(values, epsilon, min_pts);
+        run_dbscan_3d(values, epsilon, min_pts);
     }
+    else
+    {
+        std::cerr << "Error: Only 2D and 3D points are supported (found " << dim << " dimensions)\n";
+        return 1;
+    }
+
+    return 0;
 }
